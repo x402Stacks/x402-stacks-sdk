@@ -8,17 +8,13 @@ import { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import {
   makeSTXTokenTransfer,
   makeContractCall,
-  AnchorMode,
-  PostConditionMode,
   uintCV,
   principalCV,
   someCV,
   noneCV,
   bufferCVFromString,
   getAddressFromPrivateKey,
-  TransactionVersion,
 } from '@stacks/transactions';
-import { StacksMainnet, StacksTestnet, StacksNetwork } from '@stacks/network';
 import {
   StacksAccount,
   X402PaymentRequired,
@@ -34,11 +30,10 @@ export function privateKeyToAccount(
   privateKey: string,
   network: NetworkType = 'testnet'
 ): StacksAccount {
-  const transactionVersion = network === 'mainnet'
-    ? TransactionVersion.Mainnet
-    : TransactionVersion.Testnet;
-
-  const address = getAddressFromPrivateKey(privateKey, transactionVersion);
+  const address = getAddressFromPrivateKey(
+    privateKey,
+    network === 'mainnet' ? 'mainnet' : 'testnet'
+  );
 
   return {
     address,
@@ -69,13 +64,6 @@ export function encodeXPaymentResponse(response: PaymentResponse): string {
 }
 
 /**
- * Get Stacks network instance from network type
- */
-function getNetworkInstance(network: NetworkType): StacksNetwork {
-  return network === 'mainnet' ? new StacksMainnet() : new StacksTestnet();
-}
-
-/**
  * Sign a payment transaction based on x402 payment request
  * Returns the signed transaction hex (does not broadcast)
  */
@@ -85,7 +73,7 @@ async function signPayment(
 ): Promise<string> {
   const amount = BigInt(paymentRequest.maxAmountRequired);
   const tokenType = paymentRequest.tokenType || 'STX';
-  const network = getNetworkInstance(paymentRequest.network);
+  const network = paymentRequest.network;
   const memo = paymentRequest.nonce.substring(0, 34); // Max 34 bytes for Stacks memo
 
   if (tokenType === 'sBTC' || tokenType === 'USDCx') {
@@ -110,13 +98,10 @@ async function signPayment(
       functionArgs,
       senderKey: account.privateKey,
       network,
-      anchorMode: AnchorMode.Any,
-      postConditionMode: PostConditionMode.Allow,
+      postConditionMode: 'allow',
     });
 
-    // Convert Uint8Array to hex string
-    const serialized = transaction.serialize();
-    return Buffer.from(serialized).toString('hex');
+    return transaction.serialize();
   } else {
     // STX transfer
     const transaction = await makeSTXTokenTransfer({
@@ -125,12 +110,9 @@ async function signPayment(
       senderKey: account.privateKey,
       network,
       memo,
-      anchorMode: AnchorMode.Any,
     });
 
-    // Convert Uint8Array to hex string
-    const serialized = transaction.serialize();
-    return Buffer.from(serialized).toString('hex');
+    return transaction.serialize();
   }
 }
 
