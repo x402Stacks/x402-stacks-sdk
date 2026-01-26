@@ -7,8 +7,6 @@ import {
   makeSTXTokenTransfer,
   makeContractCall,
   broadcastTransaction,
-  AnchorMode,
-  PostConditionMode,
   TxBroadcastResult,
   uintCV,
   principalCV,
@@ -16,9 +14,7 @@ import {
   noneCV,
   bufferCVFromString,
   getAddressFromPrivateKey,
-  TransactionVersion,
 } from '@stacks/transactions';
-import { StacksMainnet, StacksTestnet, StacksNetwork } from '@stacks/network';
 import axios, { AxiosInstance } from 'axios';
 import {
   PaymentDetails,
@@ -34,12 +30,12 @@ import {
  * Payment client for making x402 payments on Stacks
  */
 export class X402PaymentClient {
-  private network: StacksNetwork;
+  private network: NetworkType;
   private privateKey: string;
   private httpClient: AxiosInstance;
 
   constructor(config: X402ClientConfig) {
-    this.network = this.getNetworkInstance(config.network);
+    this.network = config.network;
     this.privateKey = config.privateKey;
 
     this.httpClient = axios.create({
@@ -48,13 +44,6 @@ export class X402PaymentClient {
         'Content-Type': 'application/json',
       },
     });
-  }
-
-  /**
-   * Get Stacks network instance from network type
-   */
-  private getNetworkInstance(network: NetworkType): StacksNetwork {
-    return network === 'mainnet' ? new StacksMainnet() : new StacksTestnet();
   }
 
   /**
@@ -133,16 +122,12 @@ export class X402PaymentClient {
    */
   async signSTXTransfer(details: PaymentDetails): Promise<SignedPaymentResult> {
     try {
-      // Determine network
-      const network =
-        typeof details.network === 'string'
-          ? this.getNetworkInstance(details.network)
-          : details.network;
+      const network = details.network;
 
       // Get sender address from private key
       const senderAddress = getAddressFromPrivateKey(
         details.senderKey,
-        network instanceof StacksMainnet ? TransactionVersion.Mainnet : TransactionVersion.Testnet
+        network === 'mainnet' ? 'mainnet' : 'testnet'
       );
 
       // Build transaction options
@@ -152,7 +137,6 @@ export class X402PaymentClient {
         senderKey: this.privateKey,
         network,
         memo: details.memo || '',
-        anchorMode: AnchorMode.Any,
         ...(details.nonce !== undefined && { nonce: details.nonce }),
         ...(details.fee !== undefined && { fee: details.fee }),
       };
@@ -161,9 +145,8 @@ export class X402PaymentClient {
       const transaction = await makeSTXTokenTransfer(txOptions);
 
       // Return the signed transaction hex
-      const serialized = transaction.serialize();
       return {
-        signedTransaction: Buffer.from(serialized).toString('hex'),
+        signedTransaction: transaction.serialize(),
         success: true,
         senderAddress,
       };
@@ -181,16 +164,12 @@ export class X402PaymentClient {
    */
   async signSBTCTransfer(details: PaymentDetails): Promise<SignedPaymentResult> {
     try {
-      // Determine network
-      const network =
-        typeof details.network === 'string'
-          ? this.getNetworkInstance(details.network)
-          : details.network;
+      const network = details.network;
 
       // Get sender address from private key
       const senderAddress = getAddressFromPrivateKey(
         details.senderKey,
-        network instanceof StacksMainnet ? TransactionVersion.Mainnet : TransactionVersion.Testnet
+        network === 'mainnet' ? 'mainnet' : 'testnet'
       );
 
       // Validate token contract
@@ -216,8 +195,7 @@ export class X402PaymentClient {
         functionArgs,
         senderKey: this.privateKey,
         network,
-        anchorMode: AnchorMode.Any,
-        postConditionMode: PostConditionMode.Allow,
+        postConditionMode: 'allow' as const,
         ...(details.nonce !== undefined && { nonce: details.nonce }),
         ...(details.fee !== undefined && { fee: details.fee }),
       };
@@ -226,9 +204,8 @@ export class X402PaymentClient {
       const transaction = await makeContractCall(txOptions);
 
       // Return the signed transaction hex
-      const serialized = transaction.serialize();
       return {
-        signedTransaction: Buffer.from(serialized).toString('hex'),
+        signedTransaction: transaction.serialize(),
         success: true,
         senderAddress,
       };
@@ -246,11 +223,7 @@ export class X402PaymentClient {
    */
   async sendSTXTransfer(details: PaymentDetails): Promise<PaymentResult> {
     try {
-      // Determine network
-      const network =
-        typeof details.network === 'string'
-          ? this.getNetworkInstance(details.network)
-          : details.network;
+      const network = details.network;
 
       // Build transaction options
       const txOptions = {
@@ -259,7 +232,6 @@ export class X402PaymentClient {
         senderKey: this.privateKey,
         network,
         memo: details.memo || '',
-        anchorMode: AnchorMode.Any,
         ...(details.nonce !== undefined && { nonce: details.nonce }),
         ...(details.fee !== undefined && { fee: details.fee }),
       };
@@ -268,13 +240,13 @@ export class X402PaymentClient {
       const transaction = await makeSTXTokenTransfer(txOptions);
 
       // Broadcast transaction
-      const broadcastResponse: TxBroadcastResult = await broadcastTransaction(
+      const broadcastResponse: TxBroadcastResult = await broadcastTransaction({
         transaction,
-        network
-      );
+        network,
+      });
 
       // Check for errors in broadcast response
-      const txRaw = Buffer.from(transaction.serialize()).toString('hex');
+      const txRaw = transaction.serialize();
       if ('error' in broadcastResponse) {
         return {
           txId: '',
@@ -304,16 +276,12 @@ export class X402PaymentClient {
    */
   async sendSBTCTransfer(details: PaymentDetails): Promise<PaymentResult> {
     try {
-      // Determine network
-      const network =
-        typeof details.network === 'string'
-          ? this.getNetworkInstance(details.network)
-          : details.network;
+      const network = details.network;
 
       // Get sender address from private key
       const senderAddress = getAddressFromPrivateKey(
         details.senderKey,
-        network instanceof StacksMainnet ? TransactionVersion.Mainnet : TransactionVersion.Testnet
+        network === 'mainnet' ? 'mainnet' : 'testnet'
       );
 
       // Validate token contract
@@ -340,8 +308,7 @@ export class X402PaymentClient {
         functionArgs,
         senderKey: this.privateKey,
         network,
-        anchorMode: AnchorMode.Any,
-        postConditionMode: PostConditionMode.Allow,
+        postConditionMode: 'allow' as const,
         ...(details.nonce !== undefined && { nonce: details.nonce }),
         ...(details.fee !== undefined && { fee: details.fee }),
       };
@@ -350,13 +317,13 @@ export class X402PaymentClient {
       const transaction = await makeContractCall(txOptions);
 
       // Broadcast transaction
-      const broadcastResponse: TxBroadcastResult = await broadcastTransaction(
+      const broadcastResponse: TxBroadcastResult = await broadcastTransaction({
         transaction,
-        network
-      );
+        network,
+      });
 
       // Check for errors in broadcast response
-      const txRaw = Buffer.from(transaction.serialize()).toString('hex');
+      const txRaw = transaction.serialize();
       if ('error' in broadcastResponse) {
         return {
           txId: '',
@@ -387,16 +354,12 @@ export class X402PaymentClient {
    */
   async signUSDCxTransfer(details: PaymentDetails): Promise<SignedPaymentResult> {
     try {
-      // Determine network
-      const network =
-        typeof details.network === 'string'
-          ? this.getNetworkInstance(details.network)
-          : details.network;
+      const network = details.network;
 
       // Get sender address from private key
       const senderAddress = getAddressFromPrivateKey(
         details.senderKey,
-        network instanceof StacksMainnet ? TransactionVersion.Mainnet : TransactionVersion.Testnet
+        network === 'mainnet' ? 'mainnet' : 'testnet'
       );
 
       // Validate token contract
@@ -422,8 +385,7 @@ export class X402PaymentClient {
         functionArgs,
         senderKey: this.privateKey,
         network,
-        anchorMode: AnchorMode.Any,
-        postConditionMode: PostConditionMode.Allow,
+        postConditionMode: 'allow' as const,
         ...(details.nonce !== undefined && { nonce: details.nonce }),
         ...(details.fee !== undefined && { fee: details.fee }),
       };
@@ -432,9 +394,8 @@ export class X402PaymentClient {
       const transaction = await makeContractCall(txOptions);
 
       // Return the signed transaction hex
-      const serialized = transaction.serialize();
       return {
-        signedTransaction: Buffer.from(serialized).toString('hex'),
+        signedTransaction: transaction.serialize(),
         success: true,
         senderAddress,
       };
@@ -453,16 +414,12 @@ export class X402PaymentClient {
    */
   async sendUSDCxTransfer(details: PaymentDetails): Promise<PaymentResult> {
     try {
-      // Determine network
-      const network =
-        typeof details.network === 'string'
-          ? this.getNetworkInstance(details.network)
-          : details.network;
+      const network = details.network;
 
       // Get sender address from private key
       const senderAddress = getAddressFromPrivateKey(
         details.senderKey,
-        network instanceof StacksMainnet ? TransactionVersion.Mainnet : TransactionVersion.Testnet
+        network === 'mainnet' ? 'mainnet' : 'testnet'
       );
 
       // Validate token contract
@@ -489,8 +446,7 @@ export class X402PaymentClient {
         functionArgs,
         senderKey: this.privateKey,
         network,
-        anchorMode: AnchorMode.Any,
-        postConditionMode: PostConditionMode.Allow,
+        postConditionMode: 'allow' as const,
         ...(details.nonce !== undefined && { nonce: details.nonce }),
         ...(details.fee !== undefined && { fee: details.fee }),
       };
@@ -499,13 +455,13 @@ export class X402PaymentClient {
       const transaction = await makeContractCall(txOptions);
 
       // Broadcast transaction
-      const broadcastResponse: TxBroadcastResult = await broadcastTransaction(
+      const broadcastResponse: TxBroadcastResult = await broadcastTransaction({
         transaction,
-        network
-      );
+        network,
+      });
 
       // Check for errors in broadcast response
-      const txRaw = Buffer.from(transaction.serialize()).toString('hex');
+      const txRaw = transaction.serialize();
       if ('error' in broadcastResponse) {
         return {
           txId: '',
@@ -633,7 +589,7 @@ export class X402PaymentClient {
   /**
    * Get the network being used
    */
-  getNetwork(): StacksNetwork {
+  getNetwork(): NetworkType {
     return this.network;
   }
 }

@@ -2,8 +2,6 @@
  * x402-stacks - Type definitions for x402 payment protocol on Stacks blockchain
  */
 
-import { StacksNetwork } from '@stacks/network';
-
 /**
  * Network type for Stacks blockchain
  */
@@ -75,7 +73,7 @@ export interface PaymentDetails {
   senderKey: string;
 
   /** Network to use */
-  network: NetworkType | StacksNetwork;
+  network: NetworkType;
 
   /** Optional memo */
   memo?: string;

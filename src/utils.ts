@@ -3,8 +3,8 @@
  * Helper functions for working with x402 payments on Stacks
  */
 
-import { makeRandomPrivKey, getPublicKey, publicKeyToAddress, AddressVersion } from '@stacks/transactions';
-import { StacksMainnet, StacksTestnet } from '@stacks/network';
+import { randomPrivateKey, privateKeyToPublic, publicKeyToAddress, AddressVersion } from '@stacks/transactions';
+import { STACKS_MAINNET, STACKS_TESTNET } from '@stacks/network';
 import { NetworkType, TokenType, TokenContract } from './types';
 import { NetworkV2, STACKS_NETWORKS } from './types-v2';
 
@@ -60,8 +60,8 @@ export function microUSDCxToUSDCx(microUSDCx: bigint | string): string {
  * Generate a random Stacks keypair
  */
 export function generateKeypair(network: NetworkType = 'testnet') {
-  const privateKey = makeRandomPrivKey();
-  const publicKey = getPublicKey(privateKey);
+  const privateKey = randomPrivateKey();
+  const publicKey = privateKeyToPublic(privateKey);
 
   const addressVersion = network === 'mainnet'
     ? AddressVersion.MainnetSingleSig
@@ -70,8 +70,8 @@ export function generateKeypair(network: NetworkType = 'testnet') {
   const address = publicKeyToAddress(addressVersion, publicKey);
 
   return {
-    privateKey: Buffer.from(privateKey.data).toString('hex'),
-    publicKey: Buffer.from(publicKey.data).toString('hex'),
+    privateKey,
+    publicKey,
     address,
   };
 }
@@ -287,7 +287,7 @@ export function truncateAddress(address: string, chars: number = 6): string {
  * Get network instance from network type
  */
 export function getNetworkInstance(network: NetworkType) {
-  return network === 'mainnet' ? new StacksMainnet() : new StacksTestnet();
+  return network === 'mainnet' ? STACKS_MAINNET : STACKS_TESTNET;
 }
 
 /**
