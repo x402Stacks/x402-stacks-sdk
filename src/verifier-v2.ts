@@ -33,6 +33,15 @@ export interface SettleOptions {
 }
 
 /**
+ * Configuration options for X402PaymentVerifier
+ */
+export interface X402PaymentVerifierConfig {
+  /** HTTP timeout in milliseconds (default: 120000). Settlement operations
+   *  can take 60+ seconds for contract call confirmations (sBTC, USDCx). */
+  timeout?: number;
+}
+
+/**
  * Payment verifier for validating x402 payments on Stacks
  * Compatible with Coinbase x402 protocol
  */
@@ -40,11 +49,11 @@ export class X402PaymentVerifier {
   private facilitatorUrl: string;
   private httpClient: AxiosInstance;
 
-  constructor(facilitatorUrl: string = 'http://localhost:8085') {
+  constructor(facilitatorUrl: string = 'http://localhost:8085', config?: X402PaymentVerifierConfig) {
     this.facilitatorUrl = facilitatorUrl.replace(/\/$/, ''); // Remove trailing slash
 
     this.httpClient = axios.create({
-      timeout: 30000, // V2 may need longer timeout for settlement
+      timeout: config?.timeout ?? 120000, // 2 minutes — settlement needs time for block confirmation
       headers: {
         'Content-Type': 'application/json',
       },
@@ -228,8 +237,8 @@ export class X402PaymentVerifier {
 /**
  * Create a verifier instance
  */
-export function createVerifier(facilitatorUrl?: string): X402PaymentVerifier {
-  return new X402PaymentVerifier(facilitatorUrl);
+export function createVerifier(facilitatorUrl?: string, config?: X402PaymentVerifierConfig): X402PaymentVerifier {
+  return new X402PaymentVerifier(facilitatorUrl, config);
 }
 
 // ===== Backward Compatibility Aliases =====
