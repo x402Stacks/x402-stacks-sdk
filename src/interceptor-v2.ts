@@ -219,8 +219,74 @@ function selectPaymentOption(
   return compatibleOption || null;
 }
 
-// Track which requests have already had payment attempted
-const paymentAttempted = new WeakSet<InternalAxiosRequestConfig>();
+type MutableHeaders = {
+  get?: (name: string) => unknown;
+  set?: (name: string, value: string) => void;
+  [key: string]: unknown;
+};
+
+const PAYMENT_ATTEMPT_HEADER = 'x-x402-attempt-id';
+const PAYMENT_ATTEMPT_TTL_MS = 10 * 60 * 1000;
+const MAX_TRACKED_PAYMENT_ATTEMPTS = 5000;
+const paymentAttemptedAt = new Map<string, number>();
+
+function readHeader(config: InternalAxiosRequestConfig, name: string): string | undefined {
+  const headers = config.headers as MutableHeaders | undefined;
+  if (!headers) return undefined;
+
+  if (typeof headers.get === 'function') {
+    const value = headers.get(name);
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
+  }
+
+  const direct = headers[name];
+  if (typeof direct === 'string') return direct;
+
+  const lowercase = headers[name.toLowerCase()];
+  if (typeof lowercase === 'string') return lowercase;
+
+  return undefined;
+}
+
+function writeHeader(config: InternalAxiosRequestConfig, name: string, value: string): void {
+  const headers = (config.headers ?? {}) as MutableHeaders;
+
+  if (typeof headers.set === 'function') {
+    headers.set(name, value);
+  } else {
+    headers[name] = value;
+  }
+
+  config.headers = headers as InternalAxiosRequestConfig['headers'];
+}
+
+function cleanupPaymentAttemptCache(now: number): void {
+  for (const [attemptId, seenAt] of paymentAttemptedAt) {
+    if (now - seenAt > PAYMENT_ATTEMPT_TTL_MS) {
+      paymentAttemptedAt.delete(attemptId);
+    }
+  }
+
+  if (paymentAttemptedAt.size <= MAX_TRACKED_PAYMENT_ATTEMPTS) {
+    return;
+  }
+
+  const oldestFirst = [...paymentAttemptedAt.entries()].sort((a, b) => a[1] - b[1]);
+  const toRemove = oldestFirst.length - MAX_TRACKED_PAYMENT_ATTEMPTS;
+  for (let i = 0; i < toRemove; i += 1) {
+    paymentAttemptedAt.delete(oldestFirst[i][0]);
+  }
+}
+
+function getOrCreatePaymentAttemptId(config: InternalAxiosRequestConfig): string {
+  const existing = readHeader(config, PAYMENT_ATTEMPT_HEADER);
+  if (existing) return existing;
+
+  const attemptId = `x402-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  writeHeader(config, PAYMENT_ATTEMPT_HEADER, attemptId);
+  return attemptId;
+}
 
 /**
  * Wrap an axios instance with automatic x402 payment handling
@@ -250,24 +316,37 @@ export function wrapAxiosWithPayment(
   // Response interceptor to handle 402 Payment Required
   axiosInstance.interceptors.response.use(
     // Pass through successful responses
-    (response: AxiosResponse) => response,
+    (response: AxiosResponse) => {
+      const config = response.config as InternalAxiosRequestConfig;
+      const attemptId = readHeader(config, PAYMENT_ATTEMPT_HEADER);
+      if (attemptId) {
+        paymentAttemptedAt.delete(attemptId);
+      }
+      return response;
+    },
 
     // Handle errors (including 402)
     async (error) => {
-      const originalRequest = error.config as InternalAxiosRequestConfig;
+      const originalRequest = error.config as InternalAxiosRequestConfig | undefined;
+      if (!originalRequest) {
+        return Promise.reject(error);
+      }
 
       // Check if this is a 402 response
       if (error.response?.status !== 402) {
         return Promise.reject(error);
       }
 
+      cleanupPaymentAttemptCache(Date.now());
+      const paymentAttemptId = getOrCreatePaymentAttemptId(originalRequest);
+
       // Prevent infinite retry loops - only attempt payment once per request
-      if (paymentAttempted.has(originalRequest)) {
+      if (paymentAttemptedAt.has(paymentAttemptId)) {
         return Promise.reject(new Error('Payment already attempted for this request'));
       }
 
       // Mark this request as having payment attempted
-      paymentAttempted.add(originalRequest);
+      paymentAttemptedAt.set(paymentAttemptId, Date.now());
 
       // Try to get payment requirements from header first, then body
       let paymentRequired: PaymentRequiredV2 | null = null;
@@ -316,12 +395,12 @@ export function wrapAxiosWithPayment(
         const encodedPayload = encodePaymentPayload(paymentPayload);
 
         // Retry the request with the payment
-        originalRequest.headers = originalRequest.headers || {};
-        originalRequest.headers[X402_HEADERS.PAYMENT_SIGNATURE] = encodedPayload;
+        writeHeader(originalRequest, X402_HEADERS.PAYMENT_SIGNATURE, encodedPayload);
 
         // Make the retry request
         return axiosInstance.request(originalRequest);
       } catch (paymentError) {
+        paymentAttemptedAt.delete(paymentAttemptId);
         return Promise.reject(
           new Error(
             `Payment signing failed: ${paymentError instanceof Error ? paymentError.message : 'Unknown error'}`
