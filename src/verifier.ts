@@ -54,7 +54,7 @@ export class X402PaymentVerifierV1 {
     this.network = network;
 
     this.httpClient = axios.create({
-      timeout: 15000,
+      timeout: 120000, // 2 minutes — settlement needs time for block confirmation
       headers: {
         'Content-Type': 'application/json',
       },
