@@ -49,6 +49,9 @@ export interface PaymentMiddlewareConfig {
   /** Facilitator API URL */
   facilitatorUrl?: string;
 
+  /** Optional sponsor relay URL for sponsored settlement */
+  relayUrl?: string;
+
   /** Resource description */
   description?: string;
 
@@ -68,7 +71,9 @@ export interface PaymentMiddlewareConfig {
  */
 export function paymentMiddleware(config: PaymentMiddlewareConfig) {
   const facilitatorUrl = config.facilitatorUrl || 'http://localhost:8085';
-  const verifier = new X402PaymentVerifier(facilitatorUrl);
+  const verifier = new X402PaymentVerifier(facilitatorUrl, {
+    relayUrl: config.relayUrl,
+  });
 
   // Normalize network to CAIP-2 format
   const network: NetworkV2 = config.network.includes(':')

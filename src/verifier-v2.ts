@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import { AuthType, deserializeTransaction } from '@stacks/transactions';
 import {
   NetworkV2,
   PaymentRequirementsV2,
@@ -15,6 +16,7 @@ import {
   SupportedResponse,
   X402_ERROR_CODES,
 } from './types-v2';
+import { assetFromV2 } from './utils';
 
 /**
  * Options for verifying a payment
@@ -33,15 +35,79 @@ export interface SettleOptions {
 }
 
 /**
+ * Optional verifier configuration
+ */
+export interface X402PaymentVerifierOptions {
+  /**
+   * Optional sponsor relay URL. When configured, sponsored transactions are
+   * settled through the relay instead of the facilitator.
+   */
+  relayUrl?: string;
+}
+
+interface RelaySettleRequest {
+  transaction: string;
+  settle: {
+    expectedRecipient: string;
+    minAmount: string;
+    tokenType: 'STX' | 'sBTC' | 'USDCx';
+    resource?: string;
+  };
+}
+
+interface RelaySettleResponse {
+  success: boolean;
+  txid?: string;
+  error?: string;
+  code?: string;
+  settlement?: {
+    success?: boolean;
+    sender?: string;
+    senderAddress?: string;
+  };
+}
+
+function stripHexPrefix(value: string): string {
+  return value.startsWith('0x') ? value.slice(2) : value;
+}
+
+function withHexPrefix(value: string): string {
+  return value.startsWith('0x') ? value : `0x${value}`;
+}
+
+function isSponsoredTransaction(transactionHex: string): boolean {
+  try {
+    const raw = Buffer.from(stripHexPrefix(transactionHex), 'hex');
+    const tx = deserializeTransaction(raw);
+    return tx.auth.authType === AuthType.Sponsored;
+  } catch {
+    return false;
+  }
+}
+
+function relayTokenTypeFromAsset(asset: string): 'STX' | 'sBTC' | 'USDCx' {
+  const tokenType = assetFromV2(asset).tokenType;
+
+  if (tokenType === 'sBTC') return 'sBTC';
+  if (tokenType === 'USDCx') return 'USDCx';
+  return 'STX';
+}
+
+/**
  * Payment verifier for validating x402 payments on Stacks
  * Compatible with Coinbase x402 protocol
  */
 export class X402PaymentVerifier {
   private facilitatorUrl: string;
+  private relayUrl?: string;
   private httpClient: AxiosInstance;
 
-  constructor(facilitatorUrl: string = 'http://localhost:8085') {
+  constructor(
+    facilitatorUrl: string = 'http://localhost:8085',
+    options: X402PaymentVerifierOptions = {}
+  ) {
     this.facilitatorUrl = facilitatorUrl.replace(/\/$/, ''); // Remove trailing slash
+    this.relayUrl = options.relayUrl?.replace(/\/$/, '');
 
     this.httpClient = axios.create({
       timeout: 30000, // V2 may need longer timeout for settlement
@@ -98,6 +164,17 @@ export class X402PaymentVerifier {
     paymentPayload: PaymentPayloadV2,
     options: SettleOptions
   ): Promise<SettlementResponseV2> {
+    if (this.relayUrl && isSponsoredTransaction(paymentPayload.payload.transaction)) {
+      return this.settleViaRelay(paymentPayload, options);
+    }
+
+    return this.settleViaFacilitator(paymentPayload, options);
+  }
+
+  private async settleViaFacilitator(
+    paymentPayload: PaymentPayloadV2,
+    options: SettleOptions
+  ): Promise<SettlementResponseV2> {
     try {
       const request: FacilitatorSettleRequestV2 = {
         x402Version: 2,
@@ -121,6 +198,71 @@ export class X402PaymentVerifier {
           payer: errorData.payer,
           transaction: errorData.transaction || '',
           network: errorData.network || options.paymentRequirements.network,
+        };
+      }
+
+      return {
+        success: false,
+        errorReason: X402_ERROR_CODES.UNEXPECTED_SETTLE_ERROR,
+        transaction: '',
+        network: options.paymentRequirements.network,
+      };
+    }
+  }
+
+  private async settleViaRelay(
+    paymentPayload: PaymentPayloadV2,
+    options: SettleOptions
+  ): Promise<SettlementResponseV2> {
+    const relayUrl = this.relayUrl;
+    if (!relayUrl) {
+      return this.settleViaFacilitator(paymentPayload, options);
+    }
+
+    try {
+      const request: RelaySettleRequest = {
+        transaction: withHexPrefix(paymentPayload.payload.transaction),
+        settle: {
+          expectedRecipient: options.paymentRequirements.payTo,
+          minAmount: options.paymentRequirements.amount,
+          tokenType: relayTokenTypeFromAsset(options.paymentRequirements.asset),
+          resource: paymentPayload.resource?.url,
+        },
+      };
+
+      const response = await this.httpClient.post<RelaySettleResponse>(
+        `${relayUrl}/relay`,
+        request
+      );
+
+      const relay = response.data;
+      if (!relay.success) {
+        return {
+          success: false,
+          errorReason:
+            relay.code || relay.error || X402_ERROR_CODES.UNEXPECTED_SETTLE_ERROR,
+          payer: relay.settlement?.sender || relay.settlement?.senderAddress,
+          transaction: relay.txid || '',
+          network: options.paymentRequirements.network,
+        };
+      }
+
+      return {
+        success: true,
+        payer: relay.settlement?.sender || relay.settlement?.senderAddress,
+        transaction: relay.txid || '',
+        network: options.paymentRequirements.network,
+      };
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error) && error.response?.data) {
+        const relay = error.response.data as Partial<RelaySettleResponse>;
+        return {
+          success: false,
+          errorReason:
+            relay.code || relay.error || X402_ERROR_CODES.UNEXPECTED_SETTLE_ERROR,
+          payer: relay.settlement?.sender || relay.settlement?.senderAddress,
+          transaction: relay.txid || '',
+          network: options.paymentRequirements.network,
         };
       }
 
@@ -228,8 +370,11 @@ export class X402PaymentVerifier {
 /**
  * Create a verifier instance
  */
-export function createVerifier(facilitatorUrl?: string): X402PaymentVerifier {
-  return new X402PaymentVerifier(facilitatorUrl);
+export function createVerifier(
+  facilitatorUrl?: string,
+  options?: X402PaymentVerifierOptions
+): X402PaymentVerifier {
+  return new X402PaymentVerifier(facilitatorUrl, options);
 }
 
 // ===== Backward Compatibility Aliases =====

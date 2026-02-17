@@ -34,7 +34,11 @@ export {
   X402PaymentVerifierV2,
   createVerifierV2,
 } from './verifier-v2';
-export type { VerifyOptionsV2, SettleOptionsV2 } from './verifier-v2';
+export type {
+  VerifyOptionsV2,
+  SettleOptionsV2,
+  X402PaymentVerifierOptions,
+} from './verifier-v2';
 
 // Middleware
 export {

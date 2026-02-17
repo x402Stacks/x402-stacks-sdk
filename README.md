@@ -249,6 +249,7 @@ paymentMiddleware({
   address: string,                   // Your Stacks address
   network: 'mainnet' | 'testnet',
   facilitatorUrl?: string,           // Facilitator API URL
+  relayUrl?: string,                 // Optional sponsor relay URL
   resource?: string,                 // Custom resource identifier
   description?: string,              // Human-readable description
   mimeType?: string,                 // Response MIME type
@@ -284,11 +285,13 @@ import { X402PaymentVerifier, createVerifier } from 'x402-stacks';
 // Using the class
 const verifier = new X402PaymentVerifier(
   'https://facilitator.example.com',
-  'testnet'
+  { relayUrl: 'https://x402-relay.example.com' }
 );
 
 // Or using the factory function
-const verifier = createVerifier('https://facilitator.example.com', 'testnet');
+const verifier = createVerifier('https://facilitator.example.com', {
+  relayUrl: 'https://x402-relay.example.com',
+});
 
 // Settle a signed transaction (broadcasts via facilitator)
 const result = await verifier.settle(signedTxHex, {
