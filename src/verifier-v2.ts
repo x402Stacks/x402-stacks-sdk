@@ -36,8 +36,7 @@ export interface SettleOptions {
  * Configuration options for X402PaymentVerifier
  */
 export interface X402PaymentVerifierConfig {
-  /** HTTP timeout in milliseconds (default: 120000). Settlement operations
-   *  can take 60+ seconds for contract call confirmations (sBTC, USDCx). */
+  /** HTTP timeout in milliseconds (default: 120000) */
   timeout?: number;
 }
 
@@ -53,7 +52,7 @@ export class X402PaymentVerifier {
     this.facilitatorUrl = facilitatorUrl.replace(/\/$/, ''); // Remove trailing slash
 
     this.httpClient = axios.create({
-      timeout: config?.timeout ?? 120000, // 2 minutes — settlement needs time for block confirmation
+      timeout: config?.timeout ?? 120000,
       headers: {
         'Content-Type': 'application/json',
       },
